@@ -243,6 +243,67 @@ var _ = Describe("Create machinepool",
 					}
 				}
 			})
+
+		It("can create machinepool with availibility zone - [id:52352]", func() {
+			By("Check the help message of create machinepool")
+			output, err := machinePoolService.CreateMachinePool(clusterID, "help", "-h")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(output.String()).Should(ContainSubstring("--availability-zone"))
+
+			By("Create a machinepool without availibility zone set will work")
+			mpName := "naz-52352"
+			_, err = machinePoolService.CreateMachinePool(clusterID, mpName,
+				"--replicas", "0",
+			)
+			Expect(err).ToNot(HaveOccurred())
+			mpDescription, err := machinePoolService.DescribeAndReflectMachinePool(clusterID, mpName)
+			Expect(err).ToNot(HaveOccurred())
+			defer machinePoolService.DeleteMachinePool(clusterID, mpName)
+
+			azs := common.ParseCommaSeparatedStrings(mpDescription.AvailablityZones)
+			Expect(len(azs)).ToNot(Equal(0), "the azs of the machinepool is 0 for the cluster, it's a bug")
+			indicatedZone := azs[0]
+
+			By("Create a single AZ machinepool to the cluster")
+			mpName = "sz-52352"
+			_, err = machinePoolService.CreateMachinePool(clusterID, mpName,
+				"--replicas", "1",
+				"--availability-zone", indicatedZone,
+			)
+			Expect(err).ToNot(HaveOccurred())
+			defer machinePoolService.DeleteMachinePool(clusterID, mpName)
+
+			By("List the machinepool to verify")
+			mpList, err := machinePoolService.ListAndReflectMachinePools(clusterID)
+			Expect(err).ToNot(HaveOccurred())
+			mp := mpList.Machinepool(mpName)
+			Expect(mp).ToNot(BeNil())
+			Expect(mp.AvalaiblityZones).To(Equal(indicatedZone))
+
+			By("Scale up the machinepool replicas to 2")
+			_, err = machinePoolService.EditMachinePool(clusterID, mpName,
+				"--replicas", "2",
+				"-y",
+			)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Create another machinepool with autoscaling enabled")
+			mpName = "szau-52352"
+			_, err = machinePoolService.CreateMachinePool(clusterID, mpName,
+				"--enable-autoscaling",
+				"--min-replicas", "1",
+				"--max-replicas", "2",
+				"--availability-zone", indicatedZone,
+			)
+			Expect(err).ToNot(HaveOccurred())
+			defer machinePoolService.DeleteMachinePool(clusterID, mpName)
+
+			By("Describe the machinepool to verify")
+			mpDescription, err = machinePoolService.DescribeAndReflectMachinePool(clusterID, mpName)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(mpDescription.AvailablityZones).To(Equal(indicatedZone))
+			Expect(mpDescription.Replicas).To(Equal("1-2"))
+		})
 	})
 
 var _ = Describe("Edit machinepool",
