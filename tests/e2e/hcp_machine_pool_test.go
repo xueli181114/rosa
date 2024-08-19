@@ -3,6 +3,7 @@ package e2e
 import (
 	"strings"
 
+	"github.com/Masterminds/semver"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/openshift-online/ocm-common/pkg/test/vpc_client"
@@ -35,6 +36,12 @@ var _ = Describe("Create Machine Pool", labels.Feature.Machinepool, func() {
 	It("to hosted cluster with additional security group IDs will work [id:72195]",
 		labels.Critical, labels.Runtime.Day2,
 		func() {
+			throttleVersion, _ := semver.NewVersion("4.15.0-a.0")
+			clusterDescription, err := rosaClient.Cluster.DescribeClusterAndReflect(clusterID)
+			Expect(err).ToNot(HaveOccurred())
+			clusterVersion, err := semver.NewVersion(clusterDescription.OpenshiftVersion)
+			Expect(err).ToNot(HaveOccurred())
+
 			By("Load the vpc client of the machinepool")
 			mps, err := rosaClient.MachinePool.ListAndReflectNodePools(clusterID)
 			Expect(err).ToNot(HaveOccurred())
@@ -49,12 +56,21 @@ var _ = Describe("Create Machine Pool", labels.Feature.Machinepool, func() {
 
 			By("Create machinepool with security groups set")
 			mpName := "mp-72195"
-			_, err = rosaClient.MachinePool.CreateMachinePool(clusterID, mpName,
+			output, err := rosaClient.MachinePool.CreateMachinePool(clusterID, mpName,
 				"--additional-security-group-ids", strings.Join(sgIDs, ","),
 				"--replicas", "1",
 				"-y",
 			)
+			if clusterVersion.LessThan(throttleVersion) {
+				// Low version cannot support security group set
+				Expect(err).To(HaveOccurred())
+				Expect(output.String()).Should(ContainSubstring(
+					"Additional security groups are not supported for '%s'",
+					clusterDescription.OpenshiftVersion))
+				return
+			}
 			Expect(err).ToNot(HaveOccurred())
+
 			defer rosaClient.MachinePool.DeleteMachinePool(clusterID, mpName)
 
 			By("Check the machinepool detail by describe")
